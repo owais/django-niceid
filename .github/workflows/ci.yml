@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        django-version: ["5.1", "5.2", "6.0"]
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: niceid
+          POSTGRES_PASSWORD: niceid
+          POSTGRES_DB: niceid
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U niceid -d niceid"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install "django~=${{ matrix.django-version }}.0"
+
+      - name: Ruff
+        run: ruff check . && ruff format --check .
+
+      - name: Migrate test database
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_USER: niceid
+          POSTGRES_PASSWORD: niceid
+          POSTGRES_DB: niceid
+        run: python -m django migrate --settings=testproj.settings
+
+      - name: Pytest (unit)
+        run: pytest -m "not postgres"
+
+      - name: Pytest (PostgreSQL)
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_USER: niceid
+          POSTGRES_PASSWORD: niceid
+          POSTGRES_DB: niceid
+        run: pytest -m postgres
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

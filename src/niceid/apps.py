@@ -1,13 +1,11 @@
+import logging
+
 from django.apps import AppConfig
 from django.urls import register_converter
-from ninja.orm import register_field
-
-from project.logging import get_logger
 
 from .converter import NiceIDConverter
-from .fields import NiceID
 
-logger = get_logger()
+logger = logging.getLogger(__name__)
 
 
 class NiceIDConfig(AppConfig):
@@ -16,13 +14,24 @@ class NiceIDConfig(AppConfig):
 
     def ready(self):
         register_converter(NiceIDConverter, "niceid")
-        register_field("NiceID", NiceID)
-        try:
-            self._patch_tortoise()
-        except ImportError:
-            logger.warning("django_tortoise not installed, skipping patch")
+        self._register_ninja()
+        self._patch_tortoise()
 
-    def _patch_tortoise(self):
-        from django_tortoise import fields
+    def _register_ninja(self) -> None:
+        try:
+            from .ninja import register_ninja_field
+        except ImportError:
+            logger.debug(
+                "django-ninja not installed, skipping Ninja field registration"
+            )
+            return
+        register_ninja_field()
+
+    def _patch_tortoise(self) -> None:
+        try:
+            from django_tortoise import fields
+        except ImportError:
+            logger.debug("django-tortoise not installed, skipping Tortoise ORM patch")
+            return
 
         fields.FIELD_MAP["NiceID"] = fields.FIELD_MAP["UUIDField"]
