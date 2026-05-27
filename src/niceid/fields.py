@@ -8,9 +8,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-
-from pydantic import GetCoreSchemaHandler
-from pydantic_core import CoreSchema, core_schema
+from .validators import validate_encoded_part, validate_namespace
 
 
 @total_ordering
@@ -18,28 +16,32 @@ class NiceID:
     uuid: uuid.UUID
 
     def __init__(self, namespace: str, int: int | None = None):
+        validate_namespace(namespace)
         self.namespace = namespace
-        if not int:
+        if int is None:
             self.uuid = uuid.uuid7()
         else:
             self.uuid = uuid.UUID(int=int)
         self._encoded = base32_crockford.encode(self.uuid.int)
+        validate_encoded_part(self._encoded)
 
     @property
     def string(self) -> str:
         return f"{self.namespace}_{self._encoded}"
 
     @classmethod
-    def from_string(cls, value: str) -> "NiceID":
+    def from_string(cls, value: str) -> NiceID:
         if "_" not in value:
             raise ValueError("Invalid NiceID format")
 
-        namespace, num = value.rsplit("_", 1)
-        int = base32_crockford.decode(num)
-        return cls(namespace=namespace, int=int)
+        namespace, encoded = value.rsplit("_", 1)
+        validate_namespace(namespace)
+        validate_encoded_part(encoded)
+        decoded_int = base32_crockford.decode(encoded)
+        return cls(namespace=namespace, int=decoded_int)
 
     @classmethod
-    def from_uuid(cls, namespace: str, value: uuid.UUID) -> "NiceID":
+    def from_uuid(cls, namespace: str, value: uuid.UUID) -> NiceID:
         return cls(namespace=namespace, int=value.int)
 
     def __str__(self):
@@ -71,29 +73,24 @@ class NiceID:
     def __hash__(self) -> int:
         return hash(self.uuid.bytes)
 
-    def get_schema_type(self):
-        return NiceID
-
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema, handler):
         return {
-            "type": "NiceID",
+            "type": "string",
+            "pattern": r"^[a-z_]{2,16}_[0-9A-HJKMNP-TV-Z]+$",
             "examples": ["user_1KGGWGM8FEABRJA533GJKYW0B"],
             "description": "NiceID string representation",
         }
 
     @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source_type: Any, handler: GetCoreSchemaHandler
-    ) -> CoreSchema:
-        def validate_from_string(value: str) -> "NiceID":
+    def __get_pydantic_core_schema__(cls, source_type: Any, handler: Any) -> Any:
+        from pydantic_core import core_schema
+
+        def validate_from_string(value: str) -> NiceID:
             return cls.from_string(value)
 
-        # 1. Logic for when the input is already a NiceID instance
         instance_schema = core_schema.is_instance_schema(cls)
 
-        # 2. Logic for when the input is a string (e.g. from JSON)
-        # We chain a string schema with our custom from_string parser
         from_string_schema = core_schema.chain_schema(
             [
                 core_schema.str_schema(),
@@ -102,16 +99,13 @@ class NiceID:
         )
 
         return core_schema.json_or_python_schema(
-            # How to handle raw Python objects (NiceID or str)
             python_schema=core_schema.union_schema(
                 [
                     instance_schema,
                     from_string_schema,
                 ]
             ),
-            # How to handle JSON input (always starts as str)
             json_schema=from_string_schema,
-            # How to serialize back to a string
             serialization=core_schema.plain_serializer_function_ser_schema(
                 lambda instance: instance.string, when_used="json-unless-none"
             ),
@@ -119,15 +113,16 @@ class NiceID:
 
 
 class NiceIDField(models.Field):
-    namespace: str
+    namespace: str = ""
 
-    def __init__(self, verbose_name=None, **kwargs):
-        kwargs.setdefault("max_length", 26)
-        super().__init__(verbose_name, **kwargs)
+    def __init__(self, *args, namespace: str = "", **kwargs):
+        self.namespace = namespace
+        super().__init__(*args, **kwargs)
 
     def deconstruct(self):
         name, path, args, kwargs = super().deconstruct()
-        del kwargs["max_length"]
+        if self.namespace:
+            kwargs["namespace"] = self.namespace
         return name, path, args, kwargs
 
     def db_type(self, connection):
@@ -154,16 +149,32 @@ class NiceIDField(models.Field):
         if not value:
             return None
         if isinstance(value, int):
+            if not self.namespace:
+                raise ValidationError(
+                    _("NiceIDField requires a namespace for integer values."),
+                    code="invalid",
+                )
             return NiceID(namespace=self.namespace, int=value)
         if isinstance(value, NiceID):
             return value
         if isinstance(value, uuid.UUID):
+            if not self.namespace:
+                raise ValidationError(
+                    _("NiceIDField requires a namespace for UUID values."),
+                    code="invalid",
+                )
             return NiceID.from_uuid(self.namespace, value)
         if isinstance(value, str):
             ns = self.namespace
             if "_" in value:
                 ns, value = value.rsplit("_", 1)
-            return NiceID.from_string(ns + "_" + value)
+            if not ns:
+                raise ValidationError(
+                    _("'%(value)s' is not a valid NiceID."),
+                    code="invalid",
+                    params={"value": value},
+                )
+            return NiceID.from_string(f"{ns}_{value}")
         raise ValidationError(
             _("'%(value)s' is not a valid NiceID."),
             code="invalid",
@@ -173,23 +184,21 @@ class NiceIDField(models.Field):
 
 class UUID7(models.Func):
     function = "uuidv7"
-    output_field = NiceIDField()
+    output_field = models.UUIDField()
 
 
 class NiceIDPrimaryKeyField(NiceIDField):
     def __init__(self, *args, namespace: str = "", **kwargs):
         self.namespace = namespace
-        # kwargs["default"] = NoneNiceID
         kwargs.pop("default", None)
         kwargs["editable"] = False
         kwargs["primary_key"] = True
         kwargs.setdefault("db_default", UUID7())
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, namespace=namespace, **kwargs)
 
     def contribute_to_class(self, cls, name, private_only=False):
         super().contribute_to_class(cls, name, private_only)
 
-        # skip during migrations
         if cls.__module__ == "__fake__":
             return
 
@@ -200,12 +209,10 @@ class NiceIDPrimaryKeyField(NiceIDField):
 
         if not self.namespace:
             raise ValueError(
-                f"model {cls.__module__}.{cls.__name__} does not specify a namespace attribute on the class"
+                f"model {cls.__module__}.{cls.__name__} does not specify a "
+                "namespace attribute on the class"
             )
-        if not (2 <= len(self.namespace) <= 16):
-            raise ValueError(
-                f"NiceIDField namespace must be 2-16 characters long, got {self.namespace} (length: {len(self.namespace)})"
-            )
+        validate_namespace(self.namespace)
 
     def to_python(self, value):
         if (niceid := super().to_python(value)) is None:
@@ -213,14 +220,19 @@ class NiceIDPrimaryKeyField(NiceIDField):
 
         if niceid.namespace != self.namespace:
             raise ValidationError(
-                f"'{value}' namespace does not match the field namespace ({self.namespace}).",
+                f"'{value}' namespace does not match the field namespace "
+                f"({self.namespace}).",
             )
         return niceid
 
 
 class NiceIDFormField(forms.CharField):
     def prepare_value(self, value):
-        return NiceID.from_string(value) if value is not None else None
+        if value is None:
+            return None
+        if isinstance(value, NiceID):
+            return str(value)
+        return value
 
     def to_python(self, value):
         value = super().to_python(value)
@@ -229,5 +241,5 @@ class NiceIDFormField(forms.CharField):
             return None
         try:
             return NiceID.from_string(value)
-        except (AttributeError, ValueError):
-            raise ValidationError(_("Enter a valid ULID."), code="invalid")
+        except (AttributeError, ValueError) as exc:
+            raise ValidationError(_("Enter a valid NiceID."), code="invalid") from exc

@@ -1,7 +1,90 @@
 [project]
 name = "django-niceid"
 version = "0.1.0"
-description = "Add your description here"
+description = "Namespaced UUIDv7 identifiers for Django, stored as PostgreSQL UUIDs"
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = []
+license = "MIT"
+requires-python = ">=3.14"
+authors = [{ name = "Owais Lone", email = "owais@lone.id" }]
+keywords = ["django", "uuid", "uuidv7", "primary-key", "identifier"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: Django",
+    "Framework :: Django :: 5.1",
+    "Framework :: Django :: 5.2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "base32-crockford>=0.3.0",
+    "django>=5.1,<7",
+]
+
+[project.optional-dependencies]
+drf = ["djangorestframework>=3.15,<4"]
+ninja = ["django-ninja>=1.3,<2"]
+pydantic = ["pydantic>=2.0,<3"]
+tortoise = ["django-tortoise>=0.0.1"]
+dev = [
+    "djangorestframework>=3.15,<4",
+    "django-ninja>=1.3,<2",
+    "pydantic>=2.0,<3",
+    "pytest>=8.0",
+    "pytest-django>=4.9",
+    "ruff>=0.9",
+    "pre-commit>=4.0",
+    "psycopg[binary]>=3.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/owais/django-niceid"
+Documentation = "https://github.com/owais/django-niceid#readme"
+Repository = "https://github.com/owais/django-niceid"
+Issues = "https://github.com/owais/django-niceid/issues"
+Changelog = "https://github.com/owais/django-niceid/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/niceid"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src/niceid",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "testproj.settings"
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+markers = [
+    "postgres: tests requiring PostgreSQL (deselect with '-m \"not postgres\"')",
+    "drf: tests requiring djangorestframework",
+    "pydantic: tests requiring pydantic",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["niceid", "testproj"]
+
+[tool.ruff.lint.per-file-ignores]
+"testproj/**/migrations/*.py" = ["E501"]
+"tests/conftest.py" = ["F401"]
+"tests/test_pydantic.py" = ["E402"]
