@@ -1,7 +1,7 @@
 [project]
 name = "django-niceid"
-version = "0.1.0"
-description = "Namespaced UUIDv7 identifiers for Django, stored as PostgreSQL UUIDs"
+version = "0.2.0"
+description = "Prefixed IDs for Django stored as UUID7 in PostgreSQL"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14"

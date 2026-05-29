@@ -1,5 +1,4 @@
 import uuid
-from functools import total_ordering
 from typing import Any
 
 import base32_crockford
@@ -11,67 +10,53 @@ from django.utils.translation import gettext_lazy as _
 from .validators import validate_encoded_part, validate_namespace
 
 
-@total_ordering
-class NiceID:
+class NiceID(str):
+    """A human-readable, URL-safe identifier backed by a UUIDv7.
+
+    Subclasses str so it serializes, compares, and hashes as a plain string
+    everywhere — JSON encoding, dict keys, template rendering — with no
+    special-casing required by callers.
+    """
+
+    namespace: str
     uuid: uuid.UUID
 
-    def __init__(self, namespace: str, int: int | None = None):
+    def __new__(cls, namespace: str, int: int | None = None) -> NiceID:
         validate_namespace(namespace)
-        self.namespace = namespace
-        if int is None:
-            self.uuid = uuid.uuid7()
-        else:
-            self.uuid = uuid.UUID(int=int)
-        self._encoded = base32_crockford.encode(self.uuid.int)
-        validate_encoded_part(self._encoded)
+        _uuid = uuid.UUID(int=int) if int is not None else uuid.uuid7()
+        _encoded = base32_crockford.encode(_uuid.int)
+        validate_encoded_part(_encoded)
+        instance = super().__new__(cls, f"{namespace}_{_encoded}")
+        instance.namespace = namespace
+        instance.uuid = _uuid
+        instance._encoded = _encoded
+        return instance
 
     @property
     def string(self) -> str:
-        return f"{self.namespace}_{self._encoded}"
+        return str(self)
 
     @classmethod
     def from_string(cls, value: str) -> NiceID:
         if "_" not in value:
             raise ValueError("Invalid NiceID format")
-
         namespace, encoded = value.rsplit("_", 1)
         validate_namespace(namespace)
         validate_encoded_part(encoded)
-        decoded_int = base32_crockford.decode(encoded)
-        return cls(namespace=namespace, int=decoded_int)
+        return cls(namespace=namespace, int=base32_crockford.decode(encoded))
 
     @classmethod
     def from_uuid(cls, namespace: str, value: uuid.UUID) -> NiceID:
         return cls(namespace=namespace, int=value.int)
 
-    def __str__(self):
-        return self.string
-
-    def __repr__(self):
-        return f"NiceID('{self.namespace}_{self._encoded}')"
+    def __repr__(self) -> str:
+        return f"NiceID('{self}')"
 
     def __int__(self) -> int:
         return self.uuid.int
 
     def __bytes__(self) -> bytes:
         return self.uuid.bytes
-
-    def __lt__(self, other: Any) -> bool:
-        if isinstance(other, NiceID):
-            return self.uuid < other.uuid
-        if isinstance(other, uuid.UUID):
-            return self.uuid < other
-        return NotImplemented
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, NiceID):
-            return self.uuid == other.uuid
-        if isinstance(other, uuid.UUID):
-            return self.uuid == other
-        return NotImplemented
-
-    def __hash__(self) -> int:
-        return hash(self.uuid.bytes)
 
     @classmethod
     def __get_pydantic_json_schema__(cls, core_schema, handler):
