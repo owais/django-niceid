@@ -52,6 +52,12 @@ class NiceID(str):
     def __repr__(self) -> str:
         return f"NiceID('{self}')"
 
+    def __deepcopy__(self, memo: dict[int, Any]) -> NiceID:
+        return self.__class__.from_string(str(self))
+
+    def __reduce_ex__(self, protocol: int) -> tuple[Any, tuple[str]]:
+        return (self.__class__.from_string, (str(self),))
+
     def __int__(self) -> int:
         return self.uuid.int
 

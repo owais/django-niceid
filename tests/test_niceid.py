@@ -1,4 +1,6 @@
+import pickle
 import uuid
+from copy import deepcopy
 
 import pytest
 
@@ -51,3 +53,35 @@ class TestNiceID:
     def test_namespace_too_short(self):
         with pytest.raises(ValueError, match="Invalid namespace"):
             NiceID("x")
+
+    def test_deepcopy_instance(self):
+        original = NiceID.from_string("support_message_1KT25CN7TFQDV7STJ2NQJVS7S")
+        copied = deepcopy(original)
+        assert copied == original
+        assert copied is not original
+        assert copied.namespace == original.namespace
+        assert copied.uuid == original.uuid
+
+    def test_deepcopy_in_dict(self):
+        original = NiceID.from_string("support_message_1KT25CN7TFQDV7STJ2NQJVS7S")
+        copied = deepcopy({"message_id": original})
+        assert isinstance(copied["message_id"], NiceID)
+        assert copied["message_id"] == original
+        assert copied["message_id"].namespace == "support_message"
+
+    def test_deepcopy_namespace_with_underscores(self):
+        for value in (
+            "support_message_1KT25CN7TFQDV7STJ2NQJVS7S",
+            "ai_session_event_1KGGWGM8FEABRJA533GJKYW0B",
+        ):
+            original = NiceID.from_string(value)
+            copied = deepcopy(original)
+            assert copied == original
+            assert copied.namespace == original.namespace
+
+    def test_pickle_round_trip(self):
+        original = NiceID.from_string("support_message_1KT25CN7TFQDV7STJ2NQJVS7S")
+        restored = pickle.loads(pickle.dumps(original))
+        assert restored == original
+        assert restored.namespace == original.namespace
+        assert restored.uuid == original.uuid
